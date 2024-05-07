@@ -1,0 +1,111 @@
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(warnings = FALSE, message = FALSE)
+```
+
+```{r, echo=FALSE}
+library(tidyverse)
+library(shiny)
+library(plotly)
+library(spotifyr)
+library(lubridate)
+library(tidymodels)
+library(tidytext)
+```
+
+```{r}
+Sys.setenv(SPOTIFY_CLIENT_ID = '4ba60ca927ca4fe698d55235858ba2ed')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '8aa86e422653481bb64f924e0265560f')
+
+access_token <- get_spotify_access_token()
+```
+
+
+```{r}
+enhypen_features <- get_artist_audio_features("ENHYPEN")
+txt_features <- get_artist_audio_features("TOMORROW X TOGETHER")
+svt_features <- get_artist_audio_features("SEVENTEEN")
+ateez_features <- get_artist_audio_features("ATEEZ")
+skz_features <- get_artist_audio_features("Stray Kids")
+
+artists <- rbind(enhypen_features, txt_features, svt_features, ateez_features, skz_features)
+
+```
+
+```{r}
+artists_final = artists |>
+  rename("Artist Name" = "artist_name",
+         "Track Name" = "track_name") |>
+  select(danceability, energy, loudness, speechiness, acousticness, instrumentalness, liveness, valence, tempo, `Artist Name`, `Track Name`)
+```
+
+```{r}
+pca_rec <- recipe(~., data = artists_final) |>
+  update_role(`Track Name`, `Artist Name`, new_role = "id") |>
+  step_normalize(all_predictors()) |>
+  step_pca(all_predictors())
+
+pca_prep <- prep(pca_rec)
+
+pca_scores <- juice(pca_prep)
+```
+
+```{r}
+pca_component_plot = function(xaxis,yaxis) {
+  pca_component <- tidy(pca_prep, 2) |>
+  filter(component %in% c(xaxis,yaxis)) |>
+  mutate(terms = reorder_within(terms, abs(value), component))
+
+ggplot(pca_component, aes(value, terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ component, scales = "free_y", ncol=5) +
+  scale_y_reordered() +
+  labs(y = NULL)
+}
+```
+
+```{r}
+descriptive_text <- p("Explore Spotify Data of 5 K-Pop Artists using PCA (Principal Component Analysis). Features of spotify data used are danceability, energy, loudness, speechiness, acousticness, instrumentalness, liveness, valence, and tempo.")
+```
+
+
+
+
+
+```{r}
+ui <- fluidPage(
+  titlePanel("Spotify Data PCA"),
+  sidebarLayout(
+    sidebarPanel(
+      descriptive_text,
+      selectInput("x_axis", "X-Axis PC", choices = c("PC1", "PC2", "PC3", "PC4", "PC5")),
+      selectInput("y_axis", "Y-Axis PC", choices = c("PC1", "PC2", "PC3", "PC4", "PC5"), selected="PC2")
+      ),
+    mainPanel(
+      plotlyOutput("pca_plot")
+    )
+  ),
+  plotOutput("component_plot")
+)
+
+server = function(input, output) {
+  output$pca_plot = renderPlotly({
+    plot_ly(pca_scores, x=~get(input$x_axis), y=~get(input$y_axis), color=~`Artist Name`, type="scatter", mode="markers",
+            marker=list(opacity=0.7),
+            hovertext=~paste("Artist:", `Artist Name`, "<br> Track:", `Track Name`)) |>
+      layout(xaxis=list(title=input$x_axis), yaxis=list(title=input$y_axis))
+  })
+  
+  output$component_plot = renderPlot({
+    pca_component_plot(input$x_axis,input$y_axis)
+  })
+}
+shinyApp(ui, server)
+```
+
+
+
+
+
+
+
